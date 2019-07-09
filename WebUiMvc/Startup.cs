@@ -1,10 +1,13 @@
 ﻿using System;
+using IdentityServer4;
+using IdentityServer4.AccessTokenValidation;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.IdentityModel.Tokens;
 
 namespace WebUiMvc
 {
@@ -28,13 +31,39 @@ namespace WebUiMvc
             });
 
 
-            services.AddIdentityServer();
+            services.AddIdentityServer()
+                .AddInMemoryApiResources(Config.GetApis())
+                .AddInMemoryIdentityResources(Config.GetIdentityResources())
+                .AddInMemoryClients(Config.GetClients())
+                .AddDeveloperSigningCredential(persistKey: false);
             services.AddAuthorization();
             var identityServerAuthenticationAuthority = GetStringFromConfig("IdentityServerAuthentication", "Authority");
             var identityServerAuthenticationApiName = GetStringFromConfig("IdentityServerAuthentication", "ApiName");
 
-            services.AddAuthentication("Bearer")
-                .AddIdentityServerAuthentication(options =>
+            services.AddAuthentication()
+                .AddOpenIdConnect("aad", "Sign-in with Azure AD", options =>
+                {
+                    options.Authority = identityServerAuthenticationAuthority;
+                    options.ClientId = identityServerAuthenticationApiName;
+
+                    options.SignInScheme = IdentityServerConstants.ExternalCookieAuthenticationScheme;
+                    options.SignOutScheme = IdentityServerConstants.SignoutScheme;
+
+                    options.ResponseType = "id_token";
+                    options.CallbackPath = "/signin-aad";
+                    options.SignedOutCallbackPath = "/signout-callback-aad";
+                    options.RemoteSignOutPath = "/signout-aad";
+
+                    options.TokenValidationParameters = new TokenValidationParameters
+                    {
+                        ValidateIssuer = false,
+                        ValidAudience = "165b99fd-195f-4d93-a111-3e679246e6a9",
+
+                        NameClaimType = "name",
+                        RoleClaimType = "role"
+                    };
+                })
+                .AddIdentityServerAuthentication(IdentityServerAuthenticationDefaults.AuthenticationScheme, options =>
                 {
                     options.Authority = identityServerAuthenticationAuthority;
                     options.ApiName = identityServerAuthenticationApiName;
@@ -61,13 +90,7 @@ namespace WebUiMvc
             app.UseStaticFiles();
             app.UseCookiePolicy();
             app.UseIdentityServer();
-
-            app.UseMvc(routes =>
-            {
-                routes.MapRoute(
-                    name: "default",
-                    template: "{controller=Home}/{action=Index}/{id?}");
-            });
+            app.UseMvcWithDefaultRoute();
         }
 
         private string GetStringFromConfig(string firstName, string secondName)
